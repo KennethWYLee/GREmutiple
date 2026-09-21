@@ -45,6 +45,37 @@ test('Complete authenticated approval, practice, grading, persistence and revoca
  assert.equal((await call(learner,null,'?action=session&id='+s.id)).status,403);
  assert.equal((await call(learner,{action:'save',id:next.id,version:0,picks:{}})).status,403);
 });
+test('Each account has independent bank progress, history and session ownership',async()=>{
+ const alice={userId:'isolation-alice',email:'alice@test.invalid',displayName:'Alice'};
+ const bob={userId:'isolation-bob',email:'bob@test.invalid',displayName:'Bob'};
+ for(const user of [alice,bob]){
+  await call(user,{action:'apply'});
+  await call(owner,{action:'review',id:user.userId,status:'approved'});
+ }
+ const progress=async user=>(await call(user)).data.banks.map(b=>b.done);
+ const finish=async(user,bankId)=>{
+  const started=await call(user,{action:'start',bank:bankId});assert.equal(started.status,200);
+  const s=started.data;
+  const picks=Object.fromEntries(s.questions.map(q=>[q.id,bank.questionMap.get(q.id).answers[0]]));
+  assert.equal((await call(user,{action:'submit',id:s.id,version:s.version,picks})).status,200);
+  return s;
+ };
+ const first=await finish(alice,'B');
+ assert.deepEqual(await progress(alice),[15,0,0]);
+ assert.deepEqual(await progress(bob),[0,0,0]);
+ assert.deepEqual((await call(bob)).data.history,[]);
+ for(const action of ['save','submit'])assert.equal((await call(bob,{action,id:first.id,version:0,picks:{}})).status,404);
+ const bobRound=await finish(bob,'C');
+ await finish(alice,'B');
+ assert.deepEqual(await progress(alice),[30,0,0]);
+ assert.deepEqual(await progress(bob),[0,15,0]);
+ const aliceHistory=(await call(alice)).data.history;
+ const bobHistory=(await call(bob)).data.history;
+ assert.equal(aliceHistory.length,2);
+ assert.equal(bobHistory.length,1);assert.equal(bobHistory[0].id,bobRound.id);
+ assert.ok(aliceHistory.every(s=>s.id!==bobRound.id));
+ assert.equal((await call(alice,null,'?action=session&id='+bobRound.id)).status,404);
+});
 test('All answer keys satisfy single, multiple and blank-group scoring rules',()=>{
  assert.equal(bank.allQuestions.length,1175);assert.equal(bank.questions.length,1167);
  for(const q of bank.questions){assert.ok(q.stem.includes('_'),q.id);assert.ok(q.notes||q.codexExplanation,q.id);for(const key of q.answers)assert.ok(model.complete(q,key),q.id);assert.equal(model.correct(q,[]),false)}
