@@ -1,0 +1,4 @@
+*.pdf
+.local/
+web/data/
+
